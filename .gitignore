@@ -1,0 +1,10 @@
+venv/
+chrome_profile/
+
+*.log
+*.xlsx
+
+__pycache__/
+*.pyc
+
+.~lock*
