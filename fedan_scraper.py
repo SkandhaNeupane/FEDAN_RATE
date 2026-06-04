@@ -138,6 +138,7 @@ def load_or_create_workbook():
     wr.append(["Name", "WhatsApp Number"])
     wr.append(["Recipient 1", "9801079561"])
     wr.append(["Recipient 2", "9802079139"])
+    wr.append(["Recipient 3", "9801879256"])
     for cell in wr[1]:
         cell.font = Font(bold=True)
     wr.column_dimensions["A"].width = 22
@@ -304,10 +305,8 @@ def send_whatsapp(phone, message):
         url     = f"https://web.whatsapp.com/send?phone={phone}&text={encoded}"
         drv.get(url)
 
-        # Give WhatsApp Web time to load the chat
-        time.sleep(6)
-
         # Check if QR login is required (first run)
+        time.sleep(5)
         page = drv.page_source.lower()
         if "scan" in page and "qr" in page:
             log.warning("WhatsApp Web not logged in — waiting for QR scan")
@@ -315,7 +314,32 @@ def send_whatsapp(phone, message):
             input()
             time.sleep(3)
 
-        # Try multiple send-button selectors (WhatsApp Web updates CSS periodically)
+        wait = WebDriverWait(drv, 60)  # increased from 30 to 60 seconds
+
+        # Step 1: Wait for the message input box to confirm chat is fully loaded
+        input_box_locators = [
+            (By.CSS_SELECTOR, 'div[contenteditable="true"][data-tab="10"]'),
+            (By.CSS_SELECTOR, 'div[contenteditable="true"][title="Type a message"]'),
+            (By.XPATH,        '//div[@contenteditable="true"][@data-tab="10"]'),
+        ]
+        input_ready = False
+        for locator in input_box_locators:
+            try:
+                wait.until(EC.presence_of_element_located(locator))
+                input_ready = True
+                log.debug(f"Input box ready for {phone}")
+                break
+            except Exception:
+                continue
+
+        if not input_ready:
+            log.error(f"Chat input box not found for {phone} — chat may not have loaded")
+            return False
+
+        # Small buffer after input box appears before clicking send
+        time.sleep(2)
+
+        # Step 2: Try multiple send-button selectors (WhatsApp Web updates CSS periodically)
         locators = [
             (By.CSS_SELECTOR, 'button[aria-label="Send"]'),
             (By.XPATH,        '//button[@aria-label="Send"]'),
@@ -323,7 +347,6 @@ def send_whatsapp(phone, message):
             (By.CSS_SELECTOR, '[data-tab="11"]'),
         ]
 
-        wait = WebDriverWait(drv, 30)
         for locator in locators:
             try:
                 btn = wait.until(EC.element_to_be_clickable(locator))
@@ -402,15 +425,21 @@ def process_session(session: str):
     ws  = wb[RATES_SHEET]
     row = get_today_row(ws) or create_today_row(ws)
 
-    stored = [ws.cell(row=row, column=c).value for c in r_cols]
+    stored    = [ws.cell(row=row, column=c).value for c in r_cols]
+    delivered = [ws.cell(row=row, column=c).value for c in d_cols]
 
-    # Find last stored value and next empty slot index (0-based)
+    # Find last stored value and next usable slot (0-based).
+    # A slot is usable if empty OR has a rate but was never delivered (retry failed send).
     last_stored_val = None
     next_idx        = None
 
     for i, val in enumerate(stored):
         if val is not None:
             last_stored_val = val
+            if delivered[i] is None:
+                log.info(f"[{label}] Slot {i+1} has undelivered rate {val} — retrying")
+                next_idx = i
+                break
         else:
             next_idx = i
             break
@@ -419,13 +448,11 @@ def process_session(session: str):
         log.info(f"[{label}] All 3 slots full — ignoring further changes today")
         return
 
-    # If slot > 0 and rate equals last stored → no real change
-    if next_idx > 0 and rate == last_stored_val:
-        log.debug(f"[{label}] Rate matches last stored value ({rate}) — no new entry")
+    # If slot > 0 and rate equals last successfully delivered value → no real change
+    prev_delivered = delivered[next_idx - 1] if next_idx > 0 else None
+    if next_idx > 0 and prev_delivered is not None and rate == last_stored_val:
+        log.debug(f"[{label}] Rate matches last delivered value ({rate}) — no new entry")
         return
-
-    # ── Store rate in next slot ───────────────────────────────
-    ws.cell(row=row, column=r_cols[next_idx], value=rate)
 
     date_str = today.strftime("%B %d, %Y")
     if next_idx == 0:
@@ -438,12 +465,13 @@ def process_session(session: str):
 
     if sent:
         ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        # Write rate AND timestamp only after confirmed delivery
+        ws.cell(row=row, column=r_cols[next_idx], value=rate)
         ws.cell(row=row, column=d_cols[next_idx], value=ts)
+        wb.save(EXCEL_FILE)
         log.info(f"[{label}] Slot {next_idx + 1} → Rate: {rate} | Delivered: {ts}")
     else:
-        log.warning(f"[{label}] Slot {next_idx + 1} → Rate: {rate} | Delivery FAILED (cell left blank)")
-
-    wb.save(EXCEL_FILE)
+        log.warning(f"[{label}] Slot {next_idx + 1} → Rate: {rate} | Delivery FAILED — not saved to Excel, will retry next check")
 
 
 # ═════════════════════════════════════════════════════════════
