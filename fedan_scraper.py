@@ -72,8 +72,8 @@ HEADERS = [
 ]
 
 SESSION_CFG = {
-    "morning": {"rates": [3, 5, 7],   "delivered": [4, 6, 8],    "label": "Morning"},
-    "evening": {"rates": [9, 11, 13], "delivered": [10, 12, 14], "label": "Evening"},
+    "morning": {"rates": [3, 5, 7],   "delivered": [4, 6, 8],    "label": "10AM"},
+    "evening": {"rates": [9, 11, 13], "delivered": [10, 12, 14], "label": "2PM"},
 }
 
 
@@ -138,7 +138,6 @@ def load_or_create_workbook():
     wr.append(["Name", "WhatsApp Number"])
     wr.append(["Recipient 1", "9801079561"])
     wr.append(["Recipient 2", "9802079139"])
-    wr.append(["Recipient 3", "9801879256"])
     for cell in wr[1]:
         cell.font = Font(bold=True)
     wr.column_dimensions["A"].width = 22
@@ -273,6 +272,19 @@ def get_driver():
         log.error("Selenium not installed. Run: pip install selenium webdriver-manager")
         return None
 
+    # Kill any orphaned Chrome processes locking the profile directory.
+    # This prevents "DevToolsActivePort file doesn't exist" crashes on restart.
+    try:
+        import subprocess
+        subprocess.call(
+            ["taskkill", "/F", "/IM", "chrome.exe", "/T"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        time.sleep(2)  # Give Windows time to release the profile lock
+    except Exception:
+        pass
+
     try:
         opts = Options()
         # Dedicated Chrome profile stored alongside the Excel file.
@@ -282,7 +294,7 @@ def get_driver():
         opts.add_argument("--start-maximized")
         opts.add_argument("--disable-notifications")
         opts.add_argument("--no-first-run")
-        opts.add_experimental_option("detach", True)   # Keep browser open if script crashes
+        # detach=True removed — caused orphaned Chrome to lock the profile on restart
 
         svc     = Service(ChromeDriverManager().install())
         _driver = webdriver.Chrome(service=svc, options=opts)
