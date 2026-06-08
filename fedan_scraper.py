@@ -351,7 +351,8 @@ def send_whatsapp(phone, message):
         # Small buffer after input box appears before clicking send
         time.sleep(2)
 
-        # Step 2: Try multiple send-button selectors (WhatsApp Web updates CSS periodically)
+        # Step 2: Try clicking the Send button via multiple selectors
+        send_clicked = False
         locators = [
             (By.CSS_SELECTOR, 'button[aria-label="Send"]'),
             (By.XPATH,        '//button[@aria-label="Send"]'),
@@ -364,14 +365,52 @@ def send_whatsapp(phone, message):
                 btn = wait.until(EC.element_to_be_clickable(locator))
                 time.sleep(0.5)
                 btn.click()
-                time.sleep(3)
-                log.info(f"    Sent to {phone}")
-                return True
+                send_clicked = True
+                break
             except Exception:
                 continue
 
-        log.error(f"Send button not found for {phone}")
-        return False
+        # Step 3: If button click failed, press Enter on the input box as fallback
+        if not send_clicked:
+            log.warning(f"Send button not found for {phone} — trying Enter key fallback")
+            try:
+                from selenium.webdriver.common.keys import Keys
+                for locator in input_box_locators:
+                    try:
+                        box = drv.find_element(*locator)
+                        box.send_keys(Keys.ENTER)
+                        send_clicked = True
+                        log.info(f"    Sent via Enter key to {phone}")
+                        break
+                    except Exception:
+                        continue
+            except Exception as e:
+                log.error(f"Enter key fallback failed for {phone}: {e}")
+
+        if not send_clicked:
+            log.error(f"All send attempts failed for {phone}")
+            return False
+
+        # Step 4: Verify message was sent — input box should be empty after send
+        time.sleep(3)
+        try:
+            for locator in input_box_locators:
+                try:
+                    box = drv.find_element(*locator)
+                    if box.text.strip() == "" or box.get_attribute("innerHTML").strip() in ("", "<br>"):
+                        log.info(f"    Sent to {phone}")
+                        return True
+                    else:
+                        log.warning(f"Input box not empty after send for {phone} — message may not have sent")
+                        return False
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+        # If we can't verify, assume success since click/enter worked
+        log.info(f"    Sent to {phone} (unverified)")
+        return True
 
     except Exception as exc:
         log.error(f"WhatsApp error ({phone}): {exc}")
