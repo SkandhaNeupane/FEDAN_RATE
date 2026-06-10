@@ -1,5 +1,6 @@
 venv/
 chrome_profile/
+edge_profile/
 
 *.log
 *.xlsx
@@ -8,3 +9,5 @@ __pycache__/
 *.pyc
 
 .~lock*
+
+

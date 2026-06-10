@@ -6,7 +6,7 @@ Monitors: http://fedan.com.np/today-foreign-rate.aspx
 Windows : 10:00–10:59 AM  and  2:00–2:59 PM (NST)
 Interval: Every 1 minute within each window
 Output  : C:\\fedan_rate\\fedan_rates.xlsx
-Alert   : WhatsApp Web via Selenium (Chrome)
+Alert   : WhatsApp Web via Selenium (Edge)
 Skips   : Saturday
 """
 
@@ -25,12 +25,11 @@ from openpyxl.utils import get_column_letter
 
 try:
     from selenium import webdriver
-    from selenium.webdriver.chrome.options import Options
-    from selenium.webdriver.chrome.service import Service
+    from selenium.webdriver.edge.options import Options
+    from selenium.webdriver.edge.service import Service
     from selenium.webdriver.common.by import By
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
-    from webdriver_manager.chrome import ChromeDriverManager
     SELENIUM_OK = True
 except ImportError:
     SELENIUM_OK = False
@@ -43,11 +42,11 @@ except ImportError:
 BASE_DIR         = r"C:\fedan_rate"
 EXCEL_FILE       = os.path.join(BASE_DIR, "fedan_rates.xlsx")
 LOG_FILE         = os.path.join(BASE_DIR, "fedan_scraper.log")
-CHROME_PROFILE   = os.path.join(BASE_DIR, "chrome_profile")
+CHROME_PROFILE   = os.path.join(BASE_DIR, "edge_profile")
 
 FEDAN_URL        = "http://fedan.com.np/today-foreign-rate.aspx"
-CHECK_INTERVAL   = 120        # seconds between scrape checks
-MORNING_HOUR     = 10        # 10:00 AM – 10:59 AM
+CHECK_INTERVAL   = 300        # seconds between scrape checks
+MORNING_HOUR     = 11        # 10:00 AM – 10:59 AM
 EVENING_HOUR     = 14        # 2:00 PM  – 2:59 PM
 
 RATES_SHEET      = "Rates"
@@ -258,7 +257,7 @@ def scrape_usd_rate(session: str = "morning"):
 # ═════════════════════════════════════════════════════════════
 
 def get_driver():
-    """Return (or create) the persistent Chrome Selenium driver."""
+    """Return (or create) the persistent Edge Selenium driver."""
     global _driver
 
     if _driver:
@@ -277,7 +276,7 @@ def get_driver():
     try:
         import subprocess
         subprocess.call(
-            ["taskkill", "/F", "/IM", "chrome.exe", "/T"],
+            ["taskkill", "/F", "/IM", "msedge.exe", "/T"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
@@ -296,13 +295,13 @@ def get_driver():
         opts.add_argument("--no-first-run")
         # detach=True removed — caused orphaned Chrome to lock the profile on restart
 
-        svc     = Service(ChromeDriverManager().install())
-        _driver = webdriver.Chrome(service=svc, options=opts)
-        log.info("Chrome driver started successfully")
+        svc     = Service()
+        _driver = webdriver.Edge(service=svc, options=opts)
+        log.info("Edge driver started successfully")
         return _driver
 
     except Exception as exc:
-        log.error(f"Chrome init failed: {exc}")
+        log.error(f"Edge init failed: {exc}")
         return None
 
 
@@ -322,7 +321,7 @@ def send_whatsapp(phone, message):
         page = drv.page_source.lower()
         if "scan" in page and "qr" in page:
             log.warning("WhatsApp Web not logged in — waiting for QR scan")
-            print("\n>>> Please scan the QR code in the Chrome window, then press Enter here.")
+            print("\n>>> Please scan the QR code in the Edge window, then press Enter here.")
             input()
             time.sleep(3)
 
@@ -546,7 +545,7 @@ def main():
     log.info("=" * 55)
     log.info("  FEDAN Rate Scraper  —  Started")
     log.info(f"  Excel file   : {EXCEL_FILE}")
-    log.info(f"  Chrome profile: {CHROME_PROFILE}")
+    log.info(f"  Edge profile  : {CHROME_PROFILE}")
     log.info(f"  Morning window: {MORNING_HOUR}:00 – {MORNING_HOUR}:59")
     log.info(f"  Evening window: {EVENING_HOUR}:00 – {EVENING_HOUR}:59")
     log.info("=" * 55)
