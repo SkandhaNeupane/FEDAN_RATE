@@ -46,7 +46,7 @@ LOG_FILE         = os.path.join(BASE_DIR, "fedan_scraper.log")
 CHROME_PROFILE   = os.path.join(BASE_DIR, "chrome_profile")
 
 FEDAN_URL        = "http://fedan.com.np/today-foreign-rate.aspx"
-CHECK_INTERVAL   = 300        # seconds between scrape checks
+CHECK_INTERVAL   = 120        # seconds between scrape checks
 MORNING_HOUR     = 10        # 10:00 AM – 10:59 AM
 EVENING_HOUR     = 14        # 2:00 PM  – 2:59 PM
 
@@ -239,7 +239,7 @@ def scrape_usd_rate(session: str = "morning"):
                 try:
                     rate = float(raw)
                     if rate > 0:
-                        log.debug(f"[{session}] Parsed rate: {rate}")
+                        log.debug(f"[{session}] Parsed rate: {rate:.2f}")
                         return rate
                 except ValueError:
                     log.warning(f"[{session}] Could not parse rate value: '{raw}'")
@@ -465,11 +465,11 @@ def process_session(session: str):
 
     # Fast path: same rate as last minute's scrape — skip Excel I/O
     if rate == state["last_scraped"]:
-        log.debug(f"[{label}] Rate {rate} unchanged since last check")
+        log.debug(f"[{label}] Rate {rate:.2f} unchanged since last check")
         return
 
     state["last_scraped"] = rate
-    log.info(f"[{label}] Scraped rate: {rate}")
+    log.info(f"[{label}] Scraped rate: {rate:.2f}")
 
     # ── Open workbook ────────────────────────────────────────
     wb  = load_or_create_workbook()
@@ -502,14 +502,14 @@ def process_session(session: str):
     # If slot > 0 and rate equals last successfully delivered value → no real change
     prev_delivered = delivered[next_idx - 1] if next_idx > 0 else None
     if next_idx > 0 and prev_delivered is not None and rate == last_stored_val:
-        log.debug(f"[{label}] Rate matches last delivered value ({rate}) — no new entry")
+        log.debug(f"[{label}] Rate matches last delivered value ({rate:.2f}) — no new entry")
         return
 
     date_str = today.strftime("%B %d, %Y")
     if next_idx == 0:
-        msg = f"FEDAN USD Rate ({label}) - {date_str}: {rate}"
+        msg = f"FEDAN({label}) - {date_str}: {rate:.2f}"
     else:
-        msg = f"FEDAN USD Rate ({label} - Updated) - {date_str}: {rate}"
+        msg = f"FEDAN({label} - Updated) - {date_str}: {rate:.2f}"
 
     # ── Send WhatsApp ─────────────────────────────────────────
     sent = broadcast(wb, msg)
@@ -520,9 +520,9 @@ def process_session(session: str):
         ws.cell(row=row, column=r_cols[next_idx], value=rate)
         ws.cell(row=row, column=d_cols[next_idx], value=ts)
         wb.save(EXCEL_FILE)
-        log.info(f"[{label}] Slot {next_idx + 1} → Rate: {rate} | Delivered: {ts}")
+        log.info(f"[{label}] Slot {next_idx + 1} → Rate: {rate:.2f} | Delivered: {ts}")
     else:
-        log.warning(f"[{label}] Slot {next_idx + 1} → Rate: {rate} | Delivery FAILED — not saved to Excel, will retry next check")
+        log.warning(f"[{label}] Slot {next_idx + 1} → Rate: {rate:.2f} | Delivery FAILED — not saved to Excel, will retry next check")
 
 
 # ═════════════════════════════════════════════════════════════
