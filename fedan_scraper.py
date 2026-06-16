@@ -45,12 +45,14 @@ LOG_FILE         = os.path.join(BASE_DIR, "fedan_scraper.log")
 CHROME_PROFILE   = os.path.join(BASE_DIR, "edge_profile")
 
 FEDAN_URL        = "http://fedan.com.np/today-foreign-rate.aspx"
-CHECK_INTERVAL   = 300        # seconds between scrape checks
-MORNING_HOUR     = 11        # 10:00 AM – 10:59 AM
+CHECK_INTERVAL   = 60        # seconds between scrape checks
+MORNING_HOUR     = 10        # 10:00 AM – 10:59 AM
 EVENING_HOUR     = 14        # 2:00 PM  – 2:59 PM
 
 RATES_SHEET      = "Rates"
 RECIPIENTS_SHEET = "Recipients"
+GROUP_LINK       = "https://chat.whatsapp.com/D1SzqAW2zzh6pQ88x9ZuUG"
+GROUP_NAME       = "FEDAN"
 
 # ─────────────────────────────────────────────────────────────
 # Excel column layout
@@ -325,7 +327,17 @@ def send_whatsapp(phone, message):
             input()
             time.sleep(3)
 
+        # Check if 'Use Here' button overlay exists (e.g. if open in another window)
+        try:
+            use_here_btn = drv.find_element(By.XPATH, "//div[@role='button'][contains(., 'Use Here')]")
+            log.info("WhatsApp Web 'Use Here' dialog detected. Clicking 'Use Here'...")
+            use_here_btn.click()
+            time.sleep(3)
+        except Exception:
+            pass
+
         wait = WebDriverWait(drv, 60)  # increased from 30 to 60 seconds
+        short_wait = WebDriverWait(drv, 5)
 
         # Step 1: Wait for the message input box to confirm chat is fully loaded
         input_box_locators = [
@@ -361,7 +373,7 @@ def send_whatsapp(phone, message):
 
         for locator in locators:
             try:
-                btn = wait.until(EC.element_to_be_clickable(locator))
+                btn = short_wait.until(EC.element_to_be_clickable(locator))
                 time.sleep(0.5)
                 btn.click()
                 send_clicked = True
@@ -413,27 +425,213 @@ def send_whatsapp(phone, message):
 
     except Exception as exc:
         log.error(f"WhatsApp error ({phone}): {exc}")
+        try:
+            error_screenshot = os.path.join(BASE_DIR, "whatsapp_error.png")
+            drv.save_screenshot(error_screenshot)
+            log.info(f"Error screenshot saved to {error_screenshot}")
+        except Exception as se:
+            log.error(f"Failed to save error screenshot: {se}")
         return False
 
 
 def broadcast(wb, message):
     """
-    Send message to all recipients in the Recipients sheet.
-    Returns True if at least one delivery succeeded.
+    Send message to the WhatsApp group by searching for it by name in WhatsApp Web.
+    Returns True if delivery succeeded.
     """
-    numbers = load_recipients(wb)
-    if not numbers:
-        log.warning("No recipients configured — skipping WhatsApp")
+    from selenium.webdriver.common.keys import Keys
+
+    drv = get_driver()
+    if not drv:
+        log.error("Driver unavailable — skipping WhatsApp")
         return False
 
-    any_sent = False
-    for phone in numbers:
-        ok = send_whatsapp(phone, message)
-        if ok:
-            any_sent = True
-        time.sleep(2)   # Small gap between recipients
+    try:
+        # Go to WhatsApp Web main page
+        if "web.whatsapp.com" not in drv.current_url:
+            drv.get("https://web.whatsapp.com")
 
-    return any_sent
+        # Check if QR login is required (splash screen)
+        time.sleep(4)
+        page = drv.page_source.lower()
+        if "scan" in page and "qr" in page:
+            log.warning("WhatsApp Web not logged in — waiting for QR scan")
+            print("\n>>> Please scan the QR code in the Edge window, then press Enter here.")
+            input()
+            time.sleep(3)
+
+        # Check if 'Use Here' button overlay exists (e.g. if open in another window)
+        try:
+            use_here_btn = drv.find_element(By.XPATH, "//div[@role='button'][contains(., 'Use Here')]")
+            log.info("WhatsApp Web 'Use Here' dialog detected. Clicking 'Use Here'...")
+            use_here_btn.click()
+            time.sleep(3)
+        except Exception:
+            pass
+
+        wait = WebDriverWait(drv, 60)
+        short_wait = WebDriverWait(drv, 5)
+
+        # Wait for WhatsApp Web chat UI to fully load (past splash screen)
+        log.info("Step 1: Waiting for WhatsApp Web UI to load...")
+        chat_ui_locators = [
+            (By.CSS_SELECTOR, '#pane-side'),
+            (By.CSS_SELECTOR, 'div[aria-label="Chat list"]'),
+            (By.CSS_SELECTOR, 'div[data-testid="chat-list"]'),
+            (By.XPATH,        '//div[@role="grid"]'),
+        ]
+        for locator in chat_ui_locators:
+            try:
+                wait.until(EC.presence_of_element_located(locator))
+                log.info("Step 1: WhatsApp Web UI loaded")
+                break
+            except Exception:
+                continue
+
+        time.sleep(2)
+
+        # Find and click the search box
+        search_locators = [
+            (By.CSS_SELECTOR, 'input[data-tab="3"]'),
+            (By.CSS_SELECTOR, 'input[aria-label="Search or start new chat"]'),
+            (By.CSS_SELECTOR, 'div[contenteditable="true"][data-tab="3"]'),
+            (By.CSS_SELECTOR, 'div[title="Search input textbox"]'),
+            (By.XPATH,        '//div[@contenteditable="true"][@data-tab="3"]'),
+            (By.XPATH,        '//input[@data-tab="3"]'),
+        ]
+
+        log.info("Step 2: Looking for search box...")
+        search_ready = False
+        for locator in search_locators:
+            try:
+                search_box = short_wait.until(EC.element_to_be_clickable(locator))
+                search_box.click()
+                time.sleep(1)
+                
+                # Clear any existing text
+                search_box.send_keys(Keys.CONTROL + "a")
+                search_box.send_keys(Keys.BACKSPACE)
+                
+                search_box.send_keys(GROUP_NAME)
+                search_ready = True
+                log.info(f"Step 2: Typed '{GROUP_NAME}' in search box")
+                break
+            except Exception as e:
+                log.info(f"Search locator failed: {locator[1]} — {e}")
+                continue
+
+        if not search_ready:
+            log.error("Search box not found in WhatsApp Web")
+            return False
+
+        time.sleep(3)  # Wait for search results
+        log.info("Step 3: Looking for group in search results...")
+
+        # Click the first search result (the group)
+        result_locators = [
+            (By.XPATH, f'//span[@title="{GROUP_NAME}"]'),
+            (By.CSS_SELECTOR, 'div[aria-label="Search results."] div[role="listitem"]:first-child'),
+            (By.XPATH, '(//div[@role="listitem"])[1]'),
+        ]
+
+        group_found = False
+        for locator in result_locators:
+            try:
+                result = short_wait.until(EC.element_to_be_clickable(locator))
+                result.click()
+                group_found = True
+                log.info(f"Step 4: Group clicked successfully")
+                time.sleep(3)
+                break
+            except Exception as e:
+                log.info(f"Group locator failed: {locator[1]} — {e}")
+                continue
+
+        if not group_found:
+            log.error(f"Group '{GROUP_NAME}' not found in search results")
+            return False
+
+        # Wait for input box
+        input_box_locators = [
+            (By.CSS_SELECTOR, 'div[contenteditable="true"][data-tab="10"]'),
+            (By.CSS_SELECTOR, 'div[contenteditable="true"][title="Type a message"]'),
+            (By.XPATH,        '//div[@contenteditable="true"][@data-tab="10"]'),
+        ]
+
+        input_ready = False
+        for locator in input_box_locators:
+            try:
+                short_wait.until(EC.presence_of_element_located(locator))
+                input_ready = True
+                break
+            except Exception:
+                continue
+
+        if not input_ready:
+            log.error("Group chat input box not found")
+            return False
+
+        time.sleep(2)
+
+        # Type message
+        for locator in input_box_locators:
+            try:
+                box = drv.find_element(*locator)
+                box.click()
+                box.send_keys(message)
+                time.sleep(1)
+                break
+            except Exception:
+                continue
+
+        # Try send button
+        send_clicked = False
+        send_locators = [
+            (By.CSS_SELECTOR, 'button[aria-label="Send"]'),
+            (By.XPATH,        '//button[@aria-label="Send"]'),
+            (By.XPATH,        '//span[@data-icon="send"]/ancestor::button[1]'),
+            (By.CSS_SELECTOR, '[data-tab="11"]'),
+        ]
+
+        for locator in send_locators:
+            try:
+                btn = short_wait.until(EC.element_to_be_clickable(locator))
+                time.sleep(0.5)
+                btn.click()
+                send_clicked = True
+                break
+            except Exception:
+                continue
+
+        # Enter key fallback
+        if not send_clicked:
+            log.warning("Send button not found — trying Enter key fallback")
+            for locator in input_box_locators:
+                try:
+                    box = drv.find_element(*locator)
+                    box.send_keys(Keys.ENTER)
+                    send_clicked = True
+                    break
+                except Exception:
+                    continue
+
+        if not send_clicked:
+            log.error("All send attempts failed for group")
+            return False
+
+        time.sleep(3)
+        log.info(f"    Sent to group: {GROUP_NAME}")
+        return True
+
+    except Exception as exc:
+        log.error(f"Group send error: {exc}")
+        try:
+            error_screenshot = os.path.join(BASE_DIR, "whatsapp_error.png")
+            drv.save_screenshot(error_screenshot)
+            log.info(f"Error screenshot saved to {error_screenshot}")
+        except Exception as se:
+            log.error(f"Failed to save error screenshot: {se}")
+        return False
 
 
 # ═════════════════════════════════════════════════════════════
