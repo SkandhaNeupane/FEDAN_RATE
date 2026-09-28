@@ -2,7 +2,7 @@
 """
 FEDAN USD Rate Scraper & WhatsApp Notifier
 ==========================================
-Monitors: http://fedan.com.np/today-foreign-rate.aspx
+Monitors: https://fedan.com.np/exchange-rates
 Windows : 10:00–10:59 AM  and  2:00–2:59 PM (NST)
 Interval: Every 1 minute within each window
 Output  : C:\\fedan_rate\\fedan_rates.xlsx
@@ -48,9 +48,9 @@ EXCEL_FILE       = os.path.join(BASE_DIR, "fedan_rates.xlsx")
 LOG_FILE         = os.path.join(BASE_DIR, "fedan_scraper.log")
 CHROME_PROFILE   = os.path.join(BASE_DIR, "chrome_profile")
 
-FEDAN_URL        = "http://fedan.com.np/today-foreign-rate.aspx"
+FEDAN_URL        = "https://fedan.com.np/exchange-rates"
 CHECK_INTERVAL   = 60        # seconds between scrape checks
-MORNING_HOUR     = 10        # 10:00 AM – 10:59 AM
+MORNING_HOUR     = 11        # 10:00 AM – 10:59 AM
 EVENING_HOUR     = 14        # 2:00 PM  – 2:59 PM
 
 RATES_SHEET      = "Rates"
@@ -193,22 +193,25 @@ def load_recipients(wb):
 
 def scrape_usd_rate(session: str = "morning"):
     """
-    Fetch and parse the USD buying rate from FEDAN.
+    Fetch and parse the USD buying rate from FEDAN (new site layout).
 
-    The page has TWO separate tables, each inside its own div:
-      - Morning (10 AM): the div whose header contains span id="ContentPlaceHolder1_lbl1opm"
-      - Evening  (2 PM): the div whose header contains span id="ContentPlaceHolder1_lbl2pm"
+    The page has TWO cards, each with a header like:
+      - Morning: "Sep 28, 26 - 10 AM"
+      - Evening: "Sep 28, 26 - 2 PM"
+    Headers have no ids, so we match on the text. The card holds a table
+    (Currency | Unit | Buying Rate) once published; before that it shows
+    a "Published after ..." placeholder.
 
-    Each table has columns: Currency | Unit | Buying Rate(Average)
-    We read tds[2] (Buying Rate) from the correct table only.
-
-    Returns float or None on failure.
+    Returns float or None if not published / on failure.
     """
-    LABEL_ID = {
-        "morning": "ContentPlaceHolder1_lbl1opm",
-        "evening": "ContentPlaceHolder1_lbl2pm",
+    LABEL_SUFFIX = {"morning": "10 AM", "evening": "2 PM"}
+    suffix    = LABEL_SUFFIX[session]
+    today     = datetime.date.today()
+    # Site format: "Sep 28, 26" (abbreviated month, day without padding, 2-digit year)
+    today_strs = {
+        f"{today.strftime('%b')} {today.day}, {today.strftime('%y')}",
+        today.strftime("%b %d, %y"),
     }
-    label_id = LABEL_ID[session]
 
     try:
         resp = requests.get(
@@ -219,22 +222,33 @@ def scrape_usd_rate(session: str = "morning"):
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        # Find the span that identifies this session's block, then walk up to
-        # its containing div and find the table inside it.
-        label_span = soup.find("span", id=label_id)
+        # Find the header span for this session, e.g. "Sep 28, 26 - 10 AM"
+        label_span = None
+        label_text = ""
+        for span in soup.find_all("span", class_="text-right"):
+            txt = " ".join(span.get_text().split())
+            if txt.endswith(f"- {suffix}"):
+                label_span = span
+                label_text = txt
+                break
+
         if not label_span:
-            log.warning(f"[{session}] Label span '{label_id}' not found — rate may not be published yet")
+            log.warning(f"[{session}] Header for '{suffix}' not found — page layout may have changed")
             return None
 
-        # The span is inside the header div; the table is a sibling inside the same parent div
+        # Guard against a stale block from a previous day
+        if not any(label_text.startswith(d) for d in today_strs):
+            log.info(f"[{session}] Block is dated '{label_text}', not today — not published yet")
+            return None
+
         container = label_span.find_parent("div", class_="bg-white")
         if not container:
-            log.warning(f"[{session}] Could not find container div for label '{label_id}'")
+            log.warning(f"[{session}] Could not find container div for '{label_text}'")
             return None
 
         table = container.find("table")
         if not table:
-            log.warning(f"[{session}] No table found inside container")
+            log.info(f"[{session}] Rate not published yet (no table in '{label_text}' block)")
             return None
 
         for tr in table.find_all("tr"):
