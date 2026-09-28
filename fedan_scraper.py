@@ -50,7 +50,7 @@ CHROME_PROFILE   = os.path.join(BASE_DIR, "chrome_profile")
 
 FEDAN_URL        = "https://fedan.com.np/exchange-rates"
 CHECK_INTERVAL   = 60        # seconds between scrape checks
-MORNING_HOUR     = 11        # 10:00 AM – 10:59 AM
+MORNING_HOUR     = 10        # 10:00 AM – 10:59 AM
 EVENING_HOUR     = 14        # 2:00 PM  – 2:59 PM
 
 RATES_SHEET      = "Rates"
@@ -309,6 +309,12 @@ def _build_chrome_options():
     opts.add_argument("--start-maximized")
     opts.add_argument("--disable-notifications")
     opts.add_argument("--no-first-run")
+    # Stability flags — help Chrome start when launched by ChromeDriver
+    opts.add_argument("--no-sandbox")
+    opts.add_argument("--disable-dev-shm-usage")
+    opts.add_argument("--disable-gpu")
+    opts.add_argument("--no-default-browser-check")
+    opts.add_argument("--remote-debugging-port=9222")
     # detach=True removed — caused orphaned Chrome to lock the profile on restart
     return opts
 
@@ -350,9 +356,25 @@ def get_driver():
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+        subprocess.call(
+            ["taskkill", "/F", "/IM", "chromedriver.exe", "/T"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         time.sleep(2)  # Give Windows time to release the profile lock
     except Exception:
         pass
+
+    # Remove stale lock / port files left behind by a crashed Chrome
+    for stale in ("SingletonLock", "SingletonCookie", "SingletonSocket",
+                  "DevToolsActivePort", os.path.join("Default", "LOCK")):
+        try:
+            fp = os.path.join(CHROME_PROFILE, stale)
+            if os.path.exists(fp):
+                os.remove(fp)
+                log.info(f"Removed stale profile file: {stale}")
+        except Exception:
+            pass
 
     opts = _build_chrome_options()
 
