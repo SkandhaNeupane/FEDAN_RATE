@@ -6,7 +6,7 @@ Monitors: https://fedan.com.np/exchange-rates
 Windows : 10:00–10:59 AM  and  2:00–2:59 PM (NST)
 Interval: Every 1 minute within each window
 Output  : C:\\fedan_rate\\fedan_rates.xlsx
-Alert   : WhatsApp Web via Selenium (Edge)
+Alert   : WhatsApp Web via Selenium (Microsoft Edge)
 Skips   : Saturday
 """
 
@@ -26,13 +26,13 @@ from openpyxl.utils import get_column_letter
 
 try:
     from selenium import webdriver
-    from selenium.webdriver.chrome.options import Options
-    from selenium.webdriver.chrome.service import Service
+    from selenium.webdriver.edge.options import Options
+    from selenium.webdriver.edge.service import Service
     from selenium.webdriver.common.by import By
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
-    from webdriver_manager.chrome import ChromeDriverManager
-    
+    from webdriver_manager.microsoft import EdgeChromiumDriverManager
+
     SELENIUM_OK = True
 except ImportError:
     SELENIUM_OK = False
@@ -46,11 +46,12 @@ except ImportError:
 BASE_DIR         = r"C:\fedan_rate"
 EXCEL_FILE       = os.path.join(BASE_DIR, "fedan_rates.xlsx")
 LOG_FILE         = os.path.join(BASE_DIR, "fedan_scraper.log")
-CHROME_PROFILE   = os.path.join(BASE_DIR, "chrome_profile")
+EDGE_PROFILE     = os.path.join(BASE_DIR, "edge_profile")
+CHROME_PROFILE   = EDGE_PROFILE  # kept for backward-compat with any other references
 
 FEDAN_URL        = "https://fedan.com.np/exchange-rates"
 CHECK_INTERVAL   = 60        # seconds between scrape checks
-MORNING_HOUR     = 10        # 10:00 AM – 10:59 AM
+MORNING_HOUR     = 11        # 10:00 AM – 10:59 AM
 EVENING_HOUR     = 14        # 2:00 PM  – 2:59 PM
 
 RATES_SHEET      = "Rates"
@@ -108,7 +109,7 @@ _state = {
     "evening": {"date": None, "last_scraped": None},
 }
 
-_driver = None   # Persistent Selenium Chrome driver
+_driver = None   # Persistent Selenium Edge driver
 
 
 # ═════════════════════════════════════════════════════════════
@@ -286,9 +287,9 @@ def _clear_wdm_cache():
     Wipe webdriver-manager's cached driver metadata.
 
     webdriver-manager caches the resolved driver for a little while so it
-    doesn't have to hit the network on every run. If Chrome auto-updates
+    doesn't have to hit the network on every run. If Edge auto-updates
     in that window, the cached entry can point at a driver build that no
-    longer matches the installed Chrome version. Clearing it forces the
+    longer matches the installed Edge version. Clearing it forces the
     next install() call to look up and download the correct build fresh.
     """
     cache_dir = _wdm_cache_dir()
@@ -300,35 +301,35 @@ def _clear_wdm_cache():
         log.warning(f"Could not clear driver cache ({cache_dir}): {exc}")
 
 
-def _build_chrome_options():
+def _build_edge_options():
     opts = Options()
-    # Dedicated Chrome profile stored alongside the Excel file.
-    # First run: Chrome opens, scan QR at web.whatsapp.com — stays logged in forever.
-    opts.add_argument(f"--user-data-dir={CHROME_PROFILE}")
+    # Dedicated Edge profile stored alongside the Excel file.
+    # First run: Edge opens, scan QR at web.whatsapp.com — stays logged in forever.
+    opts.add_argument(f"--user-data-dir={EDGE_PROFILE}")
     opts.add_argument("--profile-directory=Default")
     opts.add_argument("--start-maximized")
     opts.add_argument("--disable-notifications")
     opts.add_argument("--no-first-run")
-    # Stability flags — help Chrome start when launched by ChromeDriver
+    # Stability flags — help Edge start cleanly when launched by EdgeDriver
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-gpu")
     opts.add_argument("--no-default-browser-check")
     opts.add_argument("--remote-debugging-port=9222")
-    # detach=True removed — caused orphaned Chrome to lock the profile on restart
+    # detach=True removed — caused orphaned Edge to lock the profile on restart
     return opts
 
 
 def get_driver():
-    """Return (or create) the persistent Chrome Selenium driver.
+    """Return (or create) the persistent Edge Selenium driver.
 
-    Resolves a ChromeDriver build matching the locally installed Chrome
-    version automatically (downloading a new one if needed), so a Chrome
+    Resolves an EdgeDriver build matching the locally installed Edge
+    version automatically (downloading a new one if needed), so an Edge
     auto-update can no longer crash the script with a driver-version
     mismatch. Three layers of fallback are tried in order:
 
       1. Normal webdriver-manager resolve (uses its cache if still valid).
-      2. Clear the cache and re-resolve — covers the case where Chrome
+      2. Clear the cache and re-resolve — covers the case where Edge
          updated but the cached driver entry is now stale/mismatched.
       3. Selenium's own built-in driver manager (Selenium 4.6+) as a
          last resort, in case webdriver-manager itself can't reach its
@@ -347,17 +348,17 @@ def get_driver():
         log.error("Selenium not installed. Run: pip install selenium webdriver-manager")
         return None
 
-    # Kill any orphaned Chrome processes locking the profile directory.
+    # Kill any orphaned Edge processes locking the profile directory.
     # This prevents "DevToolsActivePort file doesn't exist" crashes on restart.
     try:
         import subprocess
         subprocess.call(
-            ["taskkill", "/F", "/IM", "chrome.exe", "/T"],
+            ["taskkill", "/F", "/IM", "msedge.exe", "/T"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
         subprocess.call(
-            ["taskkill", "/F", "/IM", "chromedriver.exe", "/T"],
+            ["taskkill", "/F", "/IM", "msedgedriver.exe", "/T"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
@@ -365,18 +366,18 @@ def get_driver():
     except Exception:
         pass
 
-    # Remove stale lock / port files left behind by a crashed Chrome
+    # Remove stale lock / port files left behind by a crashed Edge
     for stale in ("SingletonLock", "SingletonCookie", "SingletonSocket",
                   "DevToolsActivePort", os.path.join("Default", "LOCK")):
         try:
-            fp = os.path.join(CHROME_PROFILE, stale)
+            fp = os.path.join(EDGE_PROFILE, stale)
             if os.path.exists(fp):
                 os.remove(fp)
                 log.info(f"Removed stale profile file: {stale}")
         except Exception:
             pass
 
-    opts = _build_chrome_options()
+    opts = _build_edge_options()
 
     strategies = ("webdriver_manager", "webdriver_manager_fresh", "selenium_manager")
     last_exc   = None
@@ -384,24 +385,24 @@ def get_driver():
     for attempt, strategy in enumerate(strategies, start=1):
         try:
             if strategy == "webdriver_manager":
-                svc = Service(ChromeDriverManager().install())
+                svc = Service(EdgeChromiumDriverManager().install())
 
             elif strategy == "webdriver_manager_fresh":
-                log.warning("Driver init failed — clearing cache and downloading a fresh matching ChromeDriver...")
+                log.warning("Driver init failed — clearing cache and downloading a fresh matching EdgeDriver...")
                 _clear_wdm_cache()
-                svc = Service(ChromeDriverManager().install())
+                svc = Service(EdgeChromiumDriverManager().install())
 
             else:  # selenium_manager — let Selenium itself resolve/download the driver
                 log.warning("webdriver-manager failed twice — falling back to Selenium's built-in driver manager...")
                 svc = Service()
 
-            _driver = webdriver.Chrome(service=svc, options=opts)
-            log.info(f"Chrome driver started successfully (strategy: {strategy})")
+            _driver = webdriver.Edge(service=svc, options=opts)
+            log.info(f"Edge driver started successfully (strategy: {strategy})")
             return _driver
 
         except Exception as exc:
             last_exc = exc
-            log.error(f"Chrome init failed [{strategy}] (attempt {attempt}/{len(strategies)}): {exc}")
+            log.error(f"Edge init failed [{strategy}] (attempt {attempt}/{len(strategies)}): {exc}")
             _driver = None
             time.sleep(2)
 
@@ -425,7 +426,7 @@ def send_whatsapp(phone, message):
         page = drv.page_source.lower()
         if "scan" in page and "qr" in page:
             log.warning("WhatsApp Web not logged in — waiting for QR scan")
-            print("\n>>> Please scan the QR code in the Chrome window, then press Enter here.")
+            print("\n>>> Please scan the QR code in the Edge window, then press Enter here.")
             input()
             time.sleep(3)
 
@@ -845,7 +846,7 @@ def main():
     log.info("=" * 55)
     log.info("  FEDAN Rate Scraper  —  Started")
     log.info(f"  Excel file   : {EXCEL_FILE}")
-    log.info(f"  Chrome profile  : {CHROME_PROFILE}")
+    log.info(f"  Edge profile    : {EDGE_PROFILE}")
     log.info(f"  Morning window: {MORNING_HOUR}:00 – {MORNING_HOUR}:59")
     log.info(f"  Evening window: {EVENING_HOUR}:00 – {EVENING_HOUR}:59")
     log.info("=" * 55)
